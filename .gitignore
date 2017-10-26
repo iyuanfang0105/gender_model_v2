@@ -1,0 +1,7 @@
+# Created by .ignore support plugin (hsz.mobi)
+.idea
+
+out/
+
+src/main/scala/META-INF/
+target/

@@ -37,7 +37,7 @@ object Valid_sex_model_performance {
     import hiveContext.implicits._
 
     // get timestamp
-    // val today = "20170917"
+    // val today = "20171025"
     val today = args(0)
     val year: Int = today.substring(0,4).trim.toInt
     val month: Int = today.substring(4,6).trim.toInt
@@ -82,14 +82,9 @@ object Valid_sex_model_performance {
     accuracy.registerTempTable("accuracy_temp_table")
     println("\n\n**************************** Starting writing table *************************** \n\n")
     val performance_table_name: String = "algo.yf_sex_model_performance_new"
-    val create_performance_table_sql: String = "create table if not exists " +
-                                  performance_table_name +
+    val create_performance_table_sql: String = "create table if not exists " + performance_table_name +
                                   " (date string, accuracy_full double, accuracy_part double) stored as textfile"
-    val insert_table_sql: String =
-      "insert into table " +
-        performance_table_name +
-        " select * from accuracy_temp_table"
-
+    val insert_table_sql: String = "insert into table " + performance_table_name + " select * from accuracy_temp_table"
     hiveContext.sql(create_performance_table_sql)
     hiveContext.sql(insert_table_sql)
     println("\n\n**************************** Finished writing table *************************** \n\n")

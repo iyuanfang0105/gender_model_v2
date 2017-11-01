@@ -22,6 +22,11 @@ object Prepare_data_set_for_build_sex_model {
 
     val sc: SparkContext = new SparkContext(sparkConf)
 
+    Logger.getLogger("org").setLevel(Level.ERROR)
+    Logger.getLogger("org.apache.spark").setLevel(Level.ERROR)
+    Logger.getLogger("akka").setLevel(Level.ERROR)
+    Logger.getRootLogger().setLevel(Level.ERROR)
+
     sc.hadoopConfiguration.set("mapred.output.compress", "false")
 
     val hiveContext: HiveContext = new HiveContext(sc)
@@ -31,8 +36,8 @@ object Prepare_data_set_for_build_sex_model {
     import hiveContext.implicits._
 
     // get timestamp
-    // val today = "20170711"
-    val today = args(0) // mai
+    val today = "20171028"
+    // val today = args(0) // mai
     val year: Int = today.substring(0,4).trim.toInt
     val month: Int = today.substring(4,6).trim.toInt
     val day: Int = today.substring(6,8).trim.toInt
@@ -40,7 +45,6 @@ object Prepare_data_set_for_build_sex_model {
     calendar.set(year, month-1, day)
     val yestoday_Date: String = new SimpleDateFormat("yyyyMMdd").format(calendar.getTime)
 
-    Logger.getLogger("org.apache.spark").setLevel(Level.ERROR)
 
     val select_data_set_sql: String = "select imei, sex from " + "(select user_id,sex from user_center.mdl_flyme_users_info where stat_date= " + yestoday_Date + " and (sex= 2 OR sex=1)) t " + "join (select imei,uid from  user_profile.edl_uid_all_info where stat_date= " + yestoday_Date + " ) s on (t.user_id = s.uid)"
     val data_set_df: DataFrame = hiveContext.sql(select_data_set_sql)
@@ -52,15 +56,15 @@ object Prepare_data_set_for_build_sex_model {
         sex = 0 // F
       (v(0).toString, sex)
     }).reduceByKey((x, y) => x)
+    val data_set_rdd_count = data_set_rdd.count()
+    val male_count = data_set_rdd.filter(_._2 == 1).count()
+    val female_count = data_set_rdd.filter(_._2 == 0).count()
+    println("\n\n ************** data_set_count_uniq_by_imei: " + data_set_rdd_count + "\n\n")
+    println("\n\n ******************** data_set_M_count: " + male_count +
+      "  ************** data_set_F_count: " + female_count + " ********* ratio: " + male_count * 1.0 / female_count + "\n\n")
+
+
     val data_set_df_final: DataFrame = data_set_rdd.map(v => imei_sex(v._1, v._2)).toDF()
-
-
-    val sex_count = data_set_rdd.map(_._2).countByValue()
-    println("\n\n ******************** data_set_count_by_imei: " + data_set_df.count() +
-      "  ************** data_set_count_uniq_by_imei: " + data_set_rdd.count() + "\n\n")
-    println("\n\n ******************** data_set_M_count: " + sex_count(1) +
-      "  ************** data_set_F_count: " + sex_count(0) + " ********* ratio: " + sex_count(1) * 1.0 / sex_count(0) + "\n\n")
-
     val data_set_table_name: String = "algo.yf_imei_sex_for_build_sexmodel_flyme"
     data_set_df_final.registerTempTable("temp")
     //val creatUserAgeLabelSQL: String = "create table if not exists " + userAgeLabelTable + " (user_id bigint, age_range string, sex string) partitioned by (stat_date string) stored as textfile"

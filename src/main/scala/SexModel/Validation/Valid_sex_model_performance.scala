@@ -4,7 +4,8 @@ import java.util.Calendar
 import java.text.SimpleDateFormat
 
 import org.apache.log4j.{Level, Logger}
-import org.apache.spark.sql.DataFrame
+import org.apache.spark.rdd.RDD
+import org.apache.spark.sql.{DataFrame, Row}
 import org.apache.spark.sql.hive.HiveContext
 import org.apache.spark.{SparkConf, SparkContext}
 
@@ -37,8 +38,8 @@ object Valid_sex_model_performance {
     import hiveContext.implicits._
 
     // get timestamp
-    // val today = "20171025"
-    val today = args(0)
+    val today = "20170710"
+    // val today = args(0)
     val year: Int = today.substring(0,4).trim.toInt
     val month: Int = today.substring(4,6).trim.toInt
     val day: Int = today.substring(6,8).trim.toInt
@@ -88,5 +89,98 @@ object Valid_sex_model_performance {
     hiveContext.sql(create_performance_table_sql)
     hiveContext.sql(insert_table_sql)
     println("\n\n**************************** Finished writing table *************************** \n\n")
+
+    compare_models_performance(sc, hiveContext)
   }
+
+
+  def compare_models_performance(sc: SparkContext,
+                                 hiveContext: HiveContext) = {
+    // user behavior of app install
+    val splitChar: String = "\u0001"
+    val source_feature_table_name: String = "app_center.adl_fdt_app_adv_model_install"
+    // (imei, appid)
+    val user_app_0: RDD[(String, String)] = get_app_user(hiveContext, source_feature_table_name, splitChar, "20171028")
+    val user_app_1: RDD[(String, String)] = get_app_user(hiveContext, source_feature_table_name, splitChar, "20170910")
+
+    val select_data_0 = "SELECT imei as imei_v3, sex as sex_v3 from algo.yf_sex_model_app_install_predict_on_30000_new_1 where stat_date=20171028"
+    val select_data_1 = "SELECT imei as imei_v2, sex as sex_v2 from algo.yf_sex_model_app_install_predict_on_30000_new_1 where stat_date=20170910"
+
+    val data_0: DataFrame = hiveContext.sql(select_data_0)
+    val data_1: DataFrame = hiveContext.sql(select_data_1)
+
+    val data = data_0.join(data_1, data_0("imei_v3") === data_1("imei_v2")).select("imei_v3", "sex_v3", "sex_v2")
+    // imei, sex_0, sex_1
+    val data_dismatch: RDD[(String, (String, String))] = data.rdd.repartition(100).map(v => (v.getString(0), (v.getString(1), v.getString(2)))).filter(v => v._2._1 != v._2._2)
+
+    // val female_apps = sc.parallelize(Seq(("2338089", "female"), ("2489797", "female")))
+    val female_apps = sc.parallelize(Seq(("2338089", "female")))
+    // user_app (imei, app_id)
+    // res (app_id, (sex_0, sex_1)) join (app_id, " ")
+    val data_dismatch_v3_female = data_dismatch.filter(_._2._1 == "female")
+    val data_dismatch_v3_male = data_dismatch.filter(_._2._1 == "male")
+
+    val data_dismatch_v2_female = data_dismatch.filter(_._2._2 == "female")
+    val data_dismatch_v2_male = data_dismatch.filter(_._2._2 == "male")
+
+    val res_v3 = data_dismatch_v3_female.join(user_app_0).map(v => (v._2._2, (v._2._1._1, v._2._1._2))).join(female_apps)
+    val res_v2 = data_dismatch_v2_female.join(user_app_1).map(v => (v._2._2, (v._2._1._1, v._2._1._2))).join(female_apps)
+
+    val res_v3_accuracy = res_v3.count() * 1.0 / data_dismatch_v3_female.count()
+    val res_v2_accuracy = res_v2.count() * 1.0 / data_dismatch_v2_female.count()
+    println("\n\n ************************** res_v3: " + res_v3.count() + "*********************\n\n")
+    println("\n\n ************************** res_v2: " + res_v2.count() + "*********************\n\n")
+    println("\n\n ************************** res_v3_accuracy: " + res_v3_accuracy + "*********************\n\n")
+    println("\n\n ************************** res_v2_accuracy: " + res_v2_accuracy + "*********************\n\n")
+
+  }
+
+  // get the user behavior of install app, format: (imei, appid)
+  def get_app_user(
+                    hiveContext: HiveContext,
+                    source_feature_table_name: String,
+                    splitChar: String,
+                    yestoday_Date: String): RDD[(String, String)] = {
+    val select_source_feature_table_sql: String = "select * from " + source_feature_table_name + " where stat_date = " + yestoday_Date
+    //(imei, feature)
+    val imei_features_df: DataFrame = hiveContext.sql(select_source_feature_table_sql)
+    //println("count of imei_features_df for " + sqls_dataType(i)._2 + ": " + imei_features_df.count())
+    val imei_features_rdd1: RDD[(String, Array[String])] = imei_features_df.map(v => (v(0).toString, v(1).toString.trim.split(" ")))
+    val imei_features_rdd2 = imei_features_rdd1.filter(_._2.length > 0)
+    //println("count of imei_features_rdd2 for " + sqls_dataType(i)._2 + ": " + imei_features_rdd2.count)
+    val imei_features_rdd3 = imei_features_rdd2.mapPartitions(iter => {
+      new Iterator[(String, String)]() {
+        var count: Int = 0
+        var value: (String, Array[String]) = iter.next()
+        override def hasNext: Boolean = {
+          if (count < value._2.length)
+            true
+          else {
+            if (iter.hasNext) {
+              count = 0
+              value = iter.next()
+              true
+            }
+            else
+              false
+          }
+        }
+
+        override def next(): (String, String) = {
+          count += 1
+          (value._2(count - 1), value._1)
+        }
+      }
+    })
+    //println("count of imei_features_rdd3 for " + sqls_dataType(i)._2 + ": " +  + imei_features_rdd3.count())
+    val imei_features_rdd4 = imei_features_rdd3.filter(_._1.trim.split(":").length == 2).map(v => {
+      val array: Array[String] = v._1.trim.split(":")
+      (v._2, array(0).trim.substring(2))
+    })
+    //println("count of imei_features_rdd4 for" + sqls_dataType(i)._2 + ": " + + imei_features_rdd4.count())
+    imei_features_rdd4
+  }
+
 }
+
+

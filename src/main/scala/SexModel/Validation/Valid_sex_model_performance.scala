@@ -90,7 +90,7 @@ object Valid_sex_model_performance {
     hiveContext.sql(insert_table_sql)
     println("\n\n**************************** Finished writing table *************************** \n\n")
 
-    compare_models_performance(sc, hiveContext)
+    // compare_models_performance(sc, hiveContext)
   }
 
 

@@ -1,11 +1,8 @@
 package SexModel.Model
 
-import java.net.URI
 import java.text.SimpleDateFormat
 import java.util.Calendar
 
-import org.apache.hadoop.conf.Configuration
-import org.apache.hadoop.fs.{FileSystem, Path}
 import org.apache.log4j.{Level, Logger}
 import org.apache.spark.mllib.classification.{LogisticRegressionModel, LogisticRegressionWithLBFGS}
 import org.apache.spark.mllib.evaluation.BinaryClassificationMetrics
@@ -49,8 +46,8 @@ object SexModelByAppInstall {
     hiveContext.setConf("mapreduce.output.fileoutputformat.compress", "false")
 
     // get timestamp
-    //val today = "20171020"
-    val today = args(0) // mai
+    val today = "20171105"
+    // val today = args(0) // mai
     val year: Int = today.substring(0,4).trim.toInt
     val month: Int = today.substring(4,6).trim.toInt
     val day: Int = today.substring(6,8).trim.toInt
@@ -66,25 +63,43 @@ object SexModelByAppInstall {
     val topK: Int = 30000
     // app install feature by imei
     val imei_feature_table_name: String = "algo.yf_sex_model_imei_app_install_features_on_" + topK.toString + "dims"
-    val create_predict_table_name: String = "algo.yf_sex_model_app_install_predict_on_" + topK.toString + "_new_1"
+
 
     // prepare data and train model
     val dim_num: Int = topK
+    val num_classes: Int = 2
+    val select_threshold_flag: Boolean = false
     val train_pred_set: (RDD[(String, LabeledPoint)], RDD[(String, LabeledPoint)]) = getTrainSet_predictSet(hiveContext, sex_know_table_name, imei_feature_table_name, dim_num, splitChar, yestoday_Date)
-    val model: (LogisticRegressionModel, RDD[(String, (Double, Double))]) = build_model(train_pred_set, 2)
-    report_model_performance(model._2)
+    val model: LogisticRegressionModel = build_model(train_pred_set, num_classes, select_threshold_flag)
 
     // predict on data set of imei
-    val pred: RDD[(String, String)] = predict(model._1, train_pred_set)
+    val pred: RDD[(String, String)] = predict(model, train_pred_set)
+    val pred_male_count = pred.filter(_._2 == "male").count()
+    val pred_female_count = pred.filter(_._2 == "female").count()
+    println("\n\n ***************** The mumber of male in prediction: " + pred_male_count + " ************* \n\n")
+    println("\n\n ***************** The mumber of female in prediction: " + pred_female_count + " ************* \n\n")
+    println("\n\n ***************** The ratio of male vs female: " + pred_male_count * 1.0 / pred_female_count + " ************* \n\n")
+
+    // write result to db
+    // write_result_to_DB(hiveContext, pred, yestoday_Date)
+  }
+
+  def write_result_to_DB(hiveContext: HiveContext,
+                         result: RDD[(String, String)],
+                         yestoday_Date: String
+                        ) = {
     // store the result
     import hiveContext.implicits._
-    val pre_df: DataFrame = pred.repartition(100).map(v => Imei_sex(v._1, v._2)).toDF
-    println("\n\n ********************* (Strarting)Insert result to yf table *********************\n\n ")
+    val pre_df: DataFrame = result.repartition(100).map(v => Imei_sex(v._1, v._2)).toDF
     pre_df.registerTempTable("prediction")
+
+    println("\n\n ********************* (Strarting)Insert result to yf table *********************\n\n ")
+    val create_predict_table_name: String = "algo.yf_sex_model_app_install_predict_on_30000_new_1"
     hiveContext.sql(
       "create table if not exists " +
         create_predict_table_name +
         " (imei string, sex string) partitioned by (stat_date string) stored as textfile")
+
     hiveContext.sql(
       "insert overwrite table " +
         create_predict_table_name +
@@ -110,6 +125,7 @@ object SexModelByAppInstall {
     println("\n\n ********************* (Done)Insert result to final table *********************\n\n ")
   }
 
+
   def predict(model: LogisticRegressionModel, train_pre: (RDD[(String, LabeledPoint)], RDD[(String, LabeledPoint)])): RDD[(String, String)] = {
     val prediction: RDD[(String, String)] = train_pre._2.map(v => {
       if (model.predict(v._2.features) == 1d)
@@ -120,6 +136,7 @@ object SexModelByAppInstall {
     val pre: RDD[(String, String)] = train_pre._1.map(v => (v._1, if (v._2.label == 1d) "male" else "female")).union(prediction)
     pre
   }
+
 
   def getTrainSet_predictSet(
                               hiveContext: HiveContext,
@@ -162,33 +179,59 @@ object SexModelByAppInstall {
     }).filter(_._2._2.length > 0)
 
     val predictSet: RDD[(String, LabeledPoint)] = imei_hasfeature_rdd1.filter(_._2._4 == 2).map(v => (v._1, new LabeledPoint(v._2._1, Vectors.sparse(dim_num, v._2._2, v._2._3))))
+    // val predictSet: RDD[(String, Double, Vector)] = imei_hasfeature_rdd1.filter(_._2._4 == 2).map(v => (v._1, v._2._1, Vectors.sparse(dim_num, v._2._2, v._2._3)))
+    // val predictSet_DF: DataFrame = hiveContext.createDataFrame(predictSet).toDF("imei", "label", "features")
     println("\n\n******************** The number of predictSet: " + predictSet.count + "  *********************\n\n")
 
     val trainSet: RDD[(String, LabeledPoint)] = imei_hasfeature_rdd1.filter(_._2._4 == 3).map(v => (v._1, new LabeledPoint(v._2._1, Vectors.sparse(dim_num, v._2._2, v._2._3))))
+    // val trainSet: RDD[(String, Double, Vector)] = imei_hasfeature_rdd1.filter(_._2._4 == 3).map(v => (v._1, v._2._1, Vectors.sparse(dim_num, v._2._2, v._2._3)))
+    // val trainSet_DF: DataFrame = hiveContext.createDataFrame(trainSet).toDF("imei", "label", "features")
     println("\n\n******************** The number of trainSet: " + trainSet.count + "  *********************\n\n")
     (trainSet, predictSet)
   }
 
+
   def build_model(
                    data_set: (RDD[(String, LabeledPoint)], RDD[(String, LabeledPoint)]),
-                   classes_num: Int
-                 ): (LogisticRegressionModel, RDD[(String, (Double, Double))]) = {
+                   classes_num: Int,
+                   select_threshold_flag: Boolean
+                 ): LogisticRegressionModel = {
     println("\n\n ********************* Build Model *************************")
     val trainSet: RDD[(String, LabeledPoint)] = data_set._1 // balance dataset
 
     val rdd_temp: Array[RDD[(String, LabeledPoint)]] = trainSet.randomSplit(Array(0.8, 0.2))
     val train_rdd: RDD[(String, LabeledPoint)] = rdd_temp(0).cache()
+    val valid_rdd: RDD[(String, LabeledPoint)] = rdd_temp(1).cache()
     println("********************* Data set number: " + train_rdd.count() + " *************************")
     println("********************* label_0 count: " + train_rdd.filter(_._2.label == 0).count() + " *******************")
     println("********************* label_1 count: " + train_rdd.filter(_._2.label == 1).count() + " ******************* \n\n")
 
-    val valid_rdd: RDD[(String, LabeledPoint)] = rdd_temp(1).cache()
-
     val model: LogisticRegressionModel = new LogisticRegressionWithLBFGS().setNumClasses(classes_num).run(train_rdd.map(_._2))
-    val valid_result: RDD[(String, (Double, Double))] = valid_rdd.map(v => (v._1, (model.predict(v._2.features), v._2.label)))
 
-    return (model, valid_result)
 
+    println("\n\n ****************** The Default threshold performance *************************** \n\n")
+    val defalut_threshold: Double = model.getThreshold.get
+    println("\n\n ************* The Default threshold: " + defalut_threshold + "***************** \n\n")
+    val valid_result_default: RDD[(String, (Double, Double))] = valid_rdd.map(v => (v._1, (model.predict(v._2.features), v._2.label)))
+    report_model_performance(valid_result_default)
+
+
+    println("\n\n ****************** The Best threshold performance *************************** \n\n")
+    // choosing the best threshold
+    model.clearThreshold()
+    val valid_result_score: RDD[(String, (Double, Double))] = valid_rdd.map(v => (v._1, (model.predict(v._2.features), v._2.label)))
+    val binaryClassificationMetrics = new BinaryClassificationMetrics(valid_result_score.map(_._2))
+    val fMeasure = binaryClassificationMetrics.fMeasureByThreshold()
+    val best_threshold = fMeasure.reduce((a, b) => {if(a._2 < b._2) b else a})
+    model.setThreshold(best_threshold._1)
+    println("\n\n ************* The Best threshold: " + model.getThreshold + "***************** \n\n")
+    val valid_result_threshold: RDD[(String, (Double, Double))] = valid_rdd.map(v => (v._1, (model.predict(v._2.features), v._2.label)))
+    report_model_performance(valid_result_threshold)
+
+    if (!select_threshold_flag)
+      model.setThreshold(defalut_threshold)
+
+    return model
   }
 
   def report_model_performance(valid_result: RDD[(String, (Double, Double))]): Unit ={

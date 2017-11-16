@@ -38,7 +38,7 @@ object Valid_sex_model_performance {
     import hiveContext.implicits._
 
     // get timestamp
-    val today = "20170710"
+    val today = "20171105"
     // val today = args(0)
     val year: Int = today.substring(0,4).trim.toInt
     val month: Int = today.substring(4,6).trim.toInt

@@ -3,7 +3,6 @@ package SexModel.Model
 import java.text.SimpleDateFormat
 import java.util.Calendar
 
-import SexModel.Validation.Valid_sex_model_performance.Accuracy
 import org.apache.log4j.{Level, Logger}
 import org.apache.spark.mllib.classification.{LogisticRegressionModel, LogisticRegressionWithLBFGS}
 import org.apache.spark.mllib.evaluation.BinaryClassificationMetrics
@@ -64,8 +63,8 @@ object SexModelByAppInstall {
     hiveContext.setConf("mapreduce.output.fileoutputformat.compress", "false")
 
     // get timestamp
-    val today = "20171105"
-    // val today = args(0) // mai
+    // val today = "20171105"
+    val today = args(0) // mai
     val year: Int = today.substring(0, 4).trim.toInt
     val month: Int = today.substring(4, 6).trim.toInt
     val day: Int = today.substring(6, 8).trim.toInt
@@ -118,50 +117,56 @@ object SexModelByAppInstall {
                         ) = {
     // store the result
     import hiveContext.implicits._
-//    val pre_df: DataFrame = merged_result.repartition(100).map(v => Imei_sex(v._1, v._2)).toDF
-//    pre_df.registerTempTable("prediction")
-//
-//    println("\n\n ********************* (Strarting)Insert result to yf table *********************\n\n ")
-//    val create_predict_table_name: String = "algo.yf_sex_model_app_install_predict_on_30000_new_1_test"
-//    hiveContext.sql(
-//      "create table if not exists " +
-//        create_predict_table_name +
-//        " (imei string, sex string) partitioned by (stat_date string) stored as textfile")
-//
-//    hiveContext.sql(
-//      "insert overwrite table " +
-//        create_predict_table_name +
-//        " partition(stat_date = " +
-//        yestoday_Date +
-//        " ) select * from prediction")
-//    println("\n\n ********************* (Done)Insert result to yf table *********************\n\n ")
 
-    //    // insert the predict result to latest table, and another job will write the result
-    //    // to final sex table
-    //    println("\n\n ********************* (Strarting)Insert result to final table *********************\n\n ")
-    //    val sex_last_pre_tableName: String = "algo.sex_model_latest_predictionAll"
-    //    val create_sex_last_pre_tableSql: String =
-    //      "create table if not exists " +
-    //        sex_last_pre_tableName +
-    //        " (imei string, sex string) stored as textfile"
-    //    val insert_sex_last_pre_tableSql: String =
-    //      "insert overwrite table " +
-    //        sex_last_pre_tableName +
-    //        " select * from prediction"
-    //    hiveContext.sql(create_sex_last_pre_tableSql)
-    //    hiveContext.sql(insert_sex_last_pre_tableSql)
-    //    println("\n\n ********************* (Done)Insert result to final table *********************\n\n ")
+    println("\n\n ********************* merged result count: " + merged_result.count() + " ********************* ")
+    val pre_df: DataFrame = merged_result.map(v => Imei_sex(v._1.toString, v._2.toString)).toDF
+    println("********************* merged result DF count: " + pre_df.count() + " ********************* \n\n")
+    pre_df.registerTempTable("prediction")
+
+    println("\n\n ********************* (Strarting)Insert result to yf table ********************* ")
+    val create_predict_table_name: String = "algo.yf_sex_model_app_install_predict_on_30000_new_1"
+    hiveContext.sql(
+      "create table if not exists " +
+        create_predict_table_name +
+        " (imei string, sex string) partitioned by (stat_date string) stored as textfile")
+    hiveContext.sql(
+      "insert overwrite table " +
+        create_predict_table_name +
+        " partition(stat_date = " +
+        yestoday_Date +
+        " ) select * from prediction")
+    println("********************* (Done)Insert result to yf table *********************\n\n ")
+
+    // insert the predict result to latest table, and another job will write the result
+    // to final sex table
+    println("\n\n ********************* (Strarting)Insert result to final table ********************* ")
+    val sex_last_pre_tableName: String = "algo.sex_model_latest_predictionAll"
+    val drop_sex_last_pre_table_sql: String = "drop table if exists" + sex_last_pre_tableName
+    val create_sex_last_pre_tableSql: String =
+      "create table if not exists " +
+        sex_last_pre_tableName +
+        " (imei string, sex string) stored as textfile"
+    val insert_sex_last_pre_tableSql: String =
+      "insert overwrite table " +
+        sex_last_pre_tableName +
+        " select * from prediction"
+    hiveContext.sql(drop_sex_last_pre_table_sql)
+    hiveContext.sql(create_sex_last_pre_tableSql)
+    hiveContext.sql(insert_sex_last_pre_tableSql)
+    println("********************* (Done)Insert result to final table *********************\n\n ")
+
+
+    // insert information to db
+    println("\n\n ********************* (Strarting)Insert performance information to db ********************* ")
     val info = train_info ++ pred_info ++ merged_info ++ accu_on_id_card
     val performance_info_df = Seq(info).map(v => Info_save(v(0), v(1), v(2), v(3), v(4), v(5), v(6), v(7), v(8), v(9), v(10), v(11), v(12), v(13))).toDF()
-
-    // val performance_info_df: DataFrame = sparkContext.parallelize(Seq(info)).map(v => Info_save(v(0), v(1), v(2), v(3), v(4), v(5), v(6), v(7), v(8), v(9), v(10), v(11), v(12), v(13))).toDF()
     performance_info_df.registerTempTable("temp_table")
-
     val performance_table_name: String = "algo.yf_sex_model_performance_new_1"
     val creat_table_sql: String = "create table if not exists " + performance_table_name + "(default_thred double, AUC_default_thred double, ACCU_default_thred double, select_thred double, AUC_select_thred double, ACCU_select_thred double, pred_M double, pred_F double, ratio_M_F double, merged_pred_M double, merged_pred_F double, merged_ratio_M_F double, ACCU_idcard_full double, ACCU_idcard_part double) partitioned by (stat_date string) stored as textfile"
     val insert_table_sql: String = "insert overwrite table " + performance_table_name + " partition(stat_date = " + yestoday_Date + " ) select * from temp_table"
     hiveContext.sql(creat_table_sql)
     hiveContext.sql(insert_table_sql)
+    println("********************* (Done)Insert performance information to db *********************\n\n ")
   }
 
 
@@ -176,7 +181,7 @@ object SexModelByAppInstall {
       else
         (v._1, "female")
     })
-    val pre: RDD[(String, String)] = train_pre._1.map(v => (v._1, if (v._2.label == 1d) "male" else "female")).union(prediction)
+    val pre: RDD[(String, String)] = train_pre._1.map(v => (v._1, if (v._2.label == 1d) "male" else "female")).union(prediction).cache()
 
     val pred_male_count = pre.filter(_._2 == "male").count()
     val pred_female_count = pre.filter(_._2 == "female").count()
@@ -206,13 +211,14 @@ object SexModelByAppInstall {
     val select_know_sex_sql: String = "select * from " + know_sex_table_name
     //(imei, sex)
     val imei_sexLabel: RDD[(String, Double)] = hiveContext.sql(select_know_sex_sql).map(_.mkString(splitChar)).filter(_.split(splitChar).length == 2).map(v => {
-      val array: Array[String] = v.trim.split(splitChar);
+      val array: Array[String] = v.trim.split(splitChar)
       (array(0).trim, array(1).trim.toDouble)
     })
     println("\n\n********************* The number of imei known sex: " + imei_sexLabel.count() + " ***********************")
 
     val select_imei_feature_sql: String = "select * from " + imei_feature_table_name + " where stat_date=" + yestoday_Date
     val imei_feature_rdd: RDD[(String, String)] = hiveContext.sql(select_imei_feature_sql).rdd.map(v => (v(0).toString, v(1).toString))
+    println("********************* The date of imei: " + yestoday_Date + " **********************")
     println("********************* The number of imei: " + imei_feature_rdd.count() + " ***********************")
 
     //(imei, (sexLabel, nullFeature, sexKnowTag))
@@ -346,12 +352,13 @@ object SexModelByAppInstall {
                                    pred: RDD[(String, String)],
                                    id_card_full_df: DataFrame): (RDD[(String, String)], ArrayBuffer[Double]) ={
     val id_card_info_full_rdd = id_card_full_df.rdd.map(v => (v.getString(0), v.getString(1))).reduceByKey((a, b) => a)
+
     val merged_pred = pred.leftOuterJoin(id_card_info_full_rdd).map(v => {
       if(v._2._2.isDefined && (v._2._1 != v._2._2.get))
         (v._1, v._2._2.get)
       else
         (v._1, v._2._1)
-    })
+    }).cache()
 
     val merged_pred_male_count = merged_pred.filter(_._2 == "male").count()
     val merged_pred_female_count = merged_pred.filter(_._2 == "female").count()

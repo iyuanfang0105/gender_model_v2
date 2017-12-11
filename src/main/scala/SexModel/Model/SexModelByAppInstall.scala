@@ -63,8 +63,8 @@ object SexModelByAppInstall {
     hiveContext.setConf("mapreduce.output.fileoutputformat.compress", "false")
 
     // get timestamp
-    // val today = "20171105"
-    val today = args(0) // mai
+    val today = "20171127"
+    // val today = args(0) // mai
     val year: Int = today.substring(0, 4).trim.toInt
     val month: Int = today.substring(4, 6).trim.toInt
     val day: Int = today.substring(6, 8).trim.toInt
@@ -141,7 +141,7 @@ object SexModelByAppInstall {
     // to final sex table
     println("\n\n ********************* (Strarting)Insert result to final table ********************* ")
     val sex_last_pre_tableName: String = "algo.sex_model_latest_predictionAll"
-    val drop_sex_last_pre_table_sql: String = "drop table if exists" + sex_last_pre_tableName
+    // val drop_sex_last_pre_table_sql: String = "drop table if exists " + sex_last_pre_tableName
     val create_sex_last_pre_tableSql: String =
       "create table if not exists " +
         sex_last_pre_tableName +
@@ -150,7 +150,7 @@ object SexModelByAppInstall {
       "insert overwrite table " +
         sex_last_pre_tableName +
         " select * from prediction"
-    hiveContext.sql(drop_sex_last_pre_table_sql)
+    // hiveContext.sql(drop_sex_last_pre_table_sql)
     hiveContext.sql(create_sex_last_pre_tableSql)
     hiveContext.sql(insert_sex_last_pre_tableSql)
     println("********************* (Done)Insert result to final table *********************\n\n ")
@@ -338,13 +338,16 @@ object SexModelByAppInstall {
                              id_card_info_part_table: String): (DataFrame, DataFrame) = {
     val select_latest_date_sql = "show PARTITIONS " + id_card_info_full_table
     val latest_date: String = hiveContext.sql(select_latest_date_sql).map(v => v(0).toString.split("=")(1).toInt).collect().sortWith((a, b) => a > b)(0).toString
-    println("***************** The latest date of id_card_info_full_table: " + latest_date.toString() + " *************")
+    println("\n\n***************** The latest date of id_card_info_full_table: " + latest_date.toString() + " *************")
 
     val select_id_info_full_sql: String = "SELECT imei, gender as sex_idcard from " + id_card_info_full_table + " where stat_date=" + latest_date
     val select_id_info_part_sql: String = "select imei, sex as sex_idcard from " + id_card_info_part_table
 
     val id_card_info_full_df: DataFrame = hiveContext.sql(select_id_info_full_sql)
     val id_card_info_part_df: DataFrame = hiveContext.sql(select_id_info_part_sql)
+    println("***************** id_card_info_full_table count: " + id_card_info_full_df.count() + " *************")
+    println("***************** id_card_info_part_df count: " + id_card_info_part_df.count() + " *************\n\n")
+
     return (id_card_info_full_df, id_card_info_part_df)
   }
 
@@ -353,12 +356,14 @@ object SexModelByAppInstall {
                                    id_card_full_df: DataFrame): (RDD[(String, String)], ArrayBuffer[Double]) ={
     val id_card_info_full_rdd = id_card_full_df.rdd.map(v => (v.getString(0), v.getString(1))).reduceByKey((a, b) => a)
 
+    val temp = id_card_info_full_rdd.subtractByKey(pred)
+
     val merged_pred = pred.leftOuterJoin(id_card_info_full_rdd).map(v => {
       if(v._2._2.isDefined && (v._2._1 != v._2._2.get))
         (v._1, v._2._2.get)
       else
         (v._1, v._2._1)
-    }).cache()
+    }).cache().union(temp)
 
     val merged_pred_male_count = merged_pred.filter(_._2 == "male").count()
     val merged_pred_female_count = merged_pred.filter(_._2 == "female").count()

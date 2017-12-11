@@ -46,7 +46,7 @@ object Prepare_data_set_for_build_sex_model {
     val yestoday_Date: String = new SimpleDateFormat("yyyyMMdd").format(calendar.getTime)
 
 
-    val select_data_set_sql: String = "select imei, sex from " + "(select user_id,sex from user_center.mdl_flyme_users_info where stat_date= " + yestoday_Date + " and (sex= 2 OR sex=1)) t " + "join (select imei,uid from  user_profile.edl_uid_all_info where stat_date= " + yestoday_Date + " ) s on (t.user_id = s.uid)"
+    val select_data_set_sql: String = "select imei, sex from " + "(select user_id,sex from user_center.mdl_flyme_users_info where stat_date= " + yestoday_Date + " and (sex= 2 OR sex=1)) t " + "join (select imei,uid from  user_profile.edl_device_uid_mz_rel where stat_date= " + yestoday_Date + " ) s on (t.user_id = s.uid)"
     val data_set_df: DataFrame = hiveContext.sql(select_data_set_sql)
     val data_set_rdd: RDD[(String, Int)] = data_set_df.map(v => {
       var sex: Int = -1

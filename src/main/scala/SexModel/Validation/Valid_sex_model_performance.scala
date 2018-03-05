@@ -93,7 +93,6 @@ object Valid_sex_model_performance {
     // compare_models_performance(sc, hiveContext)
   }
 
-
   def compare_models_performance(sc: SparkContext,
                                  hiveContext: HiveContext) = {
     // user behavior of app install
@@ -132,7 +131,6 @@ object Valid_sex_model_performance {
     println("\n\n ************************** res_v2: " + res_v2.count() + "*********************\n\n")
     println("\n\n ************************** res_v3_accuracy: " + res_v3_accuracy + "*********************\n\n")
     println("\n\n ************************** res_v2_accuracy: " + res_v2_accuracy + "*********************\n\n")
-
   }
 
   // get the user behavior of install app, format: (imei, appid)
@@ -180,7 +178,6 @@ object Valid_sex_model_performance {
     //println("count of imei_features_rdd4 for" + sqls_dataType(i)._2 + ": " + + imei_features_rdd4.count())
     imei_features_rdd4
   }
-
 }
 
 

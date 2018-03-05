@@ -63,15 +63,15 @@ object SexModelByAppInstall {
     hiveContext.setConf("mapreduce.output.fileoutputformat.compress", "false")
 
     // get timestamp
-    val today = "20171127"
-    // val today = args(0) // mai
+    // val today = "20171127"
+    val today = args(0) // mai
     val year: Int = today.substring(0, 4).trim.toInt
     val month: Int = today.substring(4, 6).trim.toInt
     val day: Int = today.substring(6, 8).trim.toInt
     val calendar: Calendar = Calendar.getInstance
     calendar.set(year, month - 1, day)
     val yestoday_Date: String = new SimpleDateFormat("yyyyMMdd").format(calendar.getTime)
-
+    println("\n************************ yestoday_Date: " + yestoday_Date + "***********************\n")
     val splitChar: String = "\u0001"
 
     // id_card data
@@ -117,7 +117,6 @@ object SexModelByAppInstall {
                         ) = {
     // store the result
     import hiveContext.implicits._
-
     println("\n\n ********************* merged result count: " + merged_result.count() + " ********************* ")
     val pre_df: DataFrame = merged_result.map(v => Imei_sex(v._1.toString, v._2.toString)).toDF
     println("********************* merged result DF count: " + pre_df.count() + " ********************* \n\n")
@@ -296,6 +295,12 @@ object SexModelByAppInstall {
     val best_threshold = fMeasure.reduce((a, b) => {
       if (a._2 < b._2) b else a
     })._1
+
+//    val threshold_set = 0.52
+//    if (best_threshold < threshold_set) {
+//      best_threshold = threshold_set
+//    }
+
     model.setThreshold(best_threshold)
     println("************* The Best threshold: " + model.getThreshold.get + "*****************")
     val valid_result_select_threshold: RDD[(String, (Double, Double))] = valid_rdd.map(v => (v._1, (model.predict(v._2.features), v._2.label)))
